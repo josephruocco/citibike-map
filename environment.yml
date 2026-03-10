@@ -1,0 +1,9 @@
+name: citibike-map
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - pydeck>=0.9,<1.0
+      - streamlit>=1.44,<2.0
