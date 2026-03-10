@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import csv
+import io
 from collections import Counter, defaultdict
 from datetime import date, datetime
 from pathlib import Path
 from statistics import mean
+from typing import BinaryIO
 
 import pydeck as pdk
 import streamlit as st
@@ -43,11 +45,22 @@ def parse_ride_time(value: str) -> int | None:
 
 
 @st.cache_data(show_spinner=False)
-def read_rides(csv_path: str) -> list[dict]:
+def read_rides_from_path(csv_path: str) -> list[dict]:
     path = Path(csv_path).expanduser().resolve()
     with path.open(newline="", encoding="utf-8-sig") as handle:
         rows = list(csv.DictReader(handle))
+    return normalize_ride_rows(rows)
 
+
+@st.cache_data(show_spinner=False)
+def read_rides_from_upload(file_bytes: bytes) -> list[dict]:
+    text_stream = io.StringIO(file_bytes.decode("utf-8-sig"))
+    rows = list(csv.DictReader(text_stream))
+    return normalize_ride_rows(rows)
+
+
+def normalize_ride_rows(rows: list[dict[str, str]]) -> list[dict]:
+    
     cleaned = []
     for row in rows:
         ride_date = parse_ride_date(row.get("date", ""))
@@ -75,8 +88,14 @@ def read_rides(csv_path: str) -> list[dict]:
 
 
 @st.cache_data(show_spinner="Loading Citi Bike station feed...")
-def build_dashboard_rows(csv_path: str) -> list[dict]:
-    rides = read_rides(csv_path)
+def build_dashboard_rows(csv_path: str | None, uploaded_bytes: bytes | None) -> list[dict]:
+    if uploaded_bytes is not None:
+        rides = read_rides_from_upload(uploaded_bytes)
+    elif csv_path:
+        rides = read_rides_from_path(csv_path)
+    else:
+        raise FileNotFoundError("Provide a CSV path or upload a CSV file.")
+
     stations = load_stations()
     normalized_lookup: dict[str, list] = defaultdict(list)
     for station in stations:
@@ -535,6 +554,7 @@ def main() -> None:
     st.title("Citi Bike Dashboard")
     st.caption("Interactive filters, ride stats, and station/route maps from your exported ride history.")
 
+    uploaded_file = st.sidebar.file_uploader("Upload CSV", type=["csv"])
     csv_path = st.sidebar.text_input("CSV path", value=DEFAULT_CSV_PATH)
     map_mode = st.sidebar.radio(
         "Map mode",
@@ -543,9 +563,11 @@ def main() -> None:
     )
 
     try:
-        rows = build_dashboard_rows(csv_path)
+        uploaded_bytes = uploaded_file.getvalue() if uploaded_file is not None else None
+        rows = build_dashboard_rows(csv_path if uploaded_bytes is None else None, uploaded_bytes)
     except Exception as exc:
         st.error(f"Unable to load ride data: {exc}")
+        st.info("If this app is running remotely, upload `citibike_rides_clean.csv` in the sidebar instead of using a local `/Users/...` path.")
         st.stop()
 
     filtered_rows = filter_rows(rows)
